@@ -67,7 +67,11 @@ public class SolrInterpreter extends Interpreter {
 
     if ("search".equals(args[0])) {
       if (args.length == 2) {
-          doQuery(args[1]);
+          try {
+            doQuery(args[1]);
+          } catch (Exception e) {
+            return new InterpreterResult(InterpreterResult.Code.INCOMPLETE, InterpreterResult.Type.TEXT, e.getMessage());
+          }
       } else {
         String msg = "Specify the query params to search with. Example: search q=Fellas&fq=genre:action";
         return new InterpreterResult(InterpreterResult.Code.INCOMPLETE, InterpreterResult.Type.TEXT, msg);
