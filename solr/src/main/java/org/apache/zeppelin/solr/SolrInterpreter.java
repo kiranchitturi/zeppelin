@@ -1,11 +1,11 @@
 package org.apache.zeppelin.solr;
 
+import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.request.QueryRequest;
-import org.apache.solr.common.params.ModifiableSolrParams;
-import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.zeppelin.annotation.ZeppelinApi;
 import org.apache.zeppelin.interpreter.Interpreter;
 import org.apache.zeppelin.interpreter.InterpreterContext;
@@ -24,12 +24,12 @@ public class SolrInterpreter extends Interpreter {
   private static Logger logger = LoggerFactory.getLogger(SolrInterpreter.class);
   public static final String ZK_HOST = "solr.zkhost";
 
-  String zkHost;
-  CloudSolrClient solrClient;
+  private String zkHost;
+  private CloudSolrClient solrClient;
   public SolrInterpreter(Properties property) {
     super(property);
   }
-  String collection;
+  private String collection;
 
   @ZeppelinApi
   public void open() {
@@ -57,8 +57,11 @@ public class SolrInterpreter extends Interpreter {
     if ("use".equals(args[0])) {
       if (args.length == 2) {
         collection = args[1];
-        String msg = "Setting collection " + collection + " as default";
-        return new InterpreterResult(InterpreterResult.Code.SUCCESS, InterpreterResult.Type.TEXT, msg);
+        InterpreterResult result = SolrQuerySupport.transformLukeResponseToZeppelinAction(SolrQuerySupport.getFieldsFromLuke(zkHost, collection));
+        if (result.code().equals(InterpreterResult.Code.SUCCESS)) {
+          result.add(InterpreterResult.Type.TEXT,  "Setting collection " + collection + " as default");
+        }
+        return result;
       } else {
         String msg = "Specify the collection to use for this dashboard. Example: use {collection_name}";
         return new InterpreterResult(InterpreterResult.Code.INCOMPLETE, InterpreterResult.Type.TEXT, msg);
@@ -68,7 +71,10 @@ public class SolrInterpreter extends Interpreter {
     if ("search".equals(args[0])) {
       if (args.length == 2) {
           try {
-            doQuery(args[1]);
+            QueryResponse response = doQuery(args[1]);
+            if (response.getStatus() != 0) {
+              return new InterpreterResult(InterpreterResult.Code.ERROR, InterpreterResult.Type.TEXT, response.getResponse().toString());
+            }
           } catch (Exception e) {
             return new InterpreterResult(InterpreterResult.Code.INCOMPLETE, InterpreterResult.Type.TEXT, e.getMessage());
           }
@@ -81,18 +87,11 @@ public class SolrInterpreter extends Interpreter {
     return null;
   }
 
-  private void doQuery(String queryParamString) throws IOException, SolrServerException {
-    String[] splitParams = queryParamString.split("&");
-
-    ModifiableSolrParams solrParams = new ModifiableSolrParams();
-    for (String keyValuePair: splitParams) {
-      String[] kv = keyValuePair.split("=");
-      if (!kv[0].trim().isEmpty() && !kv[1].trim().isEmpty()) {
-        solrParams.add(kv[0], kv[1]);
-      }
-    }
-    QueryRequest request = new QueryRequest(solrParams, SolrRequest.METHOD.POST);
-    solrClient.request(request, collection);
+  private QueryResponse doQuery(String queryParamString) throws IOException, SolrServerException {
+    SolrQuery solrQuery = SolrQuerySupport.toQuery(queryParamString);
+    QueryRequest request = new QueryRequest(solrQuery, SolrRequest.METHOD.POST);
+    QueryResponse response = request.process(solrClient, collection);
+    return response;
   }
 
   @Override
